@@ -26,53 +26,45 @@
   the river?
 */
 
-items([fox, chicken, grain]).
-
-% Something is an item if it's in the above list of items.
-item(Item) :-
-    items(Items),
-    member(Item, Items).
-
 %% The four locations where the farmer can set items down.
 locations([shore(near), shore(far), boat, hands]).
 
-location(L) :-
-    locations(Ls),
-    member(L, Ls).
-
-%% The things in this puzzle world that can move.
+%% The four things in this puzzle world that can move.
+%% The farmer moves with the boat, so no need to represent his motion.
 movable(boat).
-movable(X) :- item(X).
+movable(item(fox)).
+movable(item(chicken)).
+movable(item(chicken)).
 
 /*
   Now we need to define some rules about the physical world,
   i.e. how things are allowed to move.
+
   Multiple ways we can represent this, but we'll define
-  each type of movable object's valid path of movement through the puzzle world.
-  Each path is a list of locations that are connected in the specified
-  order and that the object is allowed to move along in that order.
+  each type of movable object's valid path through the locations.
 */
 
-movable_path(Item, [shore(_), hands, boat]) :-
-    item(Item).
+movable_path(Movable, Path) :-
+    movable_path_(Movable, Path).
 
-movable_path(boat, [shore(Shore1), shore(Shore2)]) :-
-    Shore1 \== Shore2.
+%% An object can move back and forth along its path.
+movable_path(Movable, Reverse) :-
+    movable_path_(Movable, Path),
+    reverse(Path, Reverse).
+
+%% An item can move from the shore to the farmer's hands into the boat and back.
+movable_path_(item(_), [shore(_), hands, boat]).
+
+%% The boat can move from the near shore to the far shore and back.
+movable_path_(boat, [shore(near), shore(far)]).
+
+movable_step(Movable, [From-To]) :-
+    movable_path(Movable, Path),
+    member([From-To], Path).
 
 /*
-  And an object can only move in steps along its allowed path.
+  Now we represent the danger.
 */
-
-movable_step(Movable, Step) :-
-    movable_path(Movable, Path),
-    member(Step, Path).
-
-movable_step(Movable, Step) :-
-    movable_path(Movable, Path),
-    reverse(Path, Reverse),
-    member(Step, Reverse).
-
-%% What eats what.
 predator_prey(fox, chicken).
 predator_prey(chicken, grain).
 
@@ -99,7 +91,7 @@ location_items_ok(Location, Items) :-
 safe_alone(Items) :-
     maplist(safe_alone_(Items), Items).
 
-safe_alone_(Items, Item) :-
+safe_alone_(Items, item(Item)) :-
     maplist(\OtherItem^(\+ predator_prey(Item, OtherItem))).
 
 %% Holds if list L has a length <= Max.
