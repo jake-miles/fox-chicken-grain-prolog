@@ -1,5 +1,7 @@
 :- use_module(library(builtins)).
 :- use_module(library(lists)).
+:- use_module(library(reif)).
+:- use_module(library(clpz)).
 
 /*
   The fox, chicken and grain puzzle, in prolog using a
@@ -31,64 +33,163 @@ item(Item) :-
     items(Items),
     member(Item, Items).
 
-% The river has two shores that we can toggle between.
-shore(near).
-shore(far).
-
 %% The four locations where the farmer can set items down.
-location(L) :- shore(L).
-location(boat).
-location(hands).
+locations([shore(near), shore(far), boat, hands]).
 
-%% The things that can move in this world.
+location(L) :-
+    locations(Ls),
+    member(L, Ls).
+
+%% The things in this puzzle world that can move.
 movable(boat).
 movable(X) :- item(X).
+
+/*
+  Now we need to define some rules about the physical world,
+  i.e. how things are allowed to move.
+  Multiple ways we can represent this, but we'll define
+  each type of movable object's valid path of movement through the puzzle world.
+  Each path is a list of locations that are connected in the specified
+  order and that the object is allowed to move along in that order.
+*/
+
+movable_path(Item, [shore(_), hands, boat]) :-
+    item(Item).
+
+movable_path(boat, [shore(Shore1), shore(Shore2)]) :-
+    Shore1 \== Shore2.
+
+/*
+  And an object can only move in steps along its allowed path.
+*/
+
+movable_step(Movable, Step) :-
+    movable_path(Movable, Path),
+    member(Step, Path).
+
+movable_step(Movable, Step) :-
+    movable_path(Movable, Path),
+    reverse(Path, Reverse),
+    member(Step, Reverse).
 
 %% What eats what.
 predator_prey(fox, chicken).
 predator_prey(chicken, grain).
 
-%% What collection of items can coexist in each location.
+/*
+  location_items_ok(Location, Items).
+  Holds if Items can all exist at Location together
+  according to the rules of the puzzle.
+*/
+
+%% only one item in the boat at a time.
 location_items_ok(boat, Items) :-
-    list_length_at_most(Items, 1).
+    list_length_lte(Items, 1).
 
+%% at most 2 items in the farmer's hands at a time.
 location_items_ok(hands, Items) :-
-    list_length_at_most(Items, 2).
+    list_length_lte(Items, 2).
 
+%% Items can be placed together on a shore if they're all safe when left alone.
 location_items_ok(Location, Items) :-
     shore(Location),
-    list_length_at_most(Items, 3),
     safe_alone(Items).
 
-%% Items that can be safely left alone together.
+%% Holds if items can be safely left alone together.
 safe_alone(Items) :-
     maplist(safe_alone_(Items), Items).
 
 safe_alone_(Items, Item) :-
     maplist(\OtherItem^(\+ predator_prey(Item, OtherItem))).
 
+%% Holds if list L has a length <= Max.
+list_length_lte(L, Max) :-
+    length(L, Length),
+    Length #=< Max.
+
 /*
-  To express the rest of the problem and its solution,
-  which involves changing the state of the world,
-  we need a concept of the current state of the world.
-  These accessors encapsulate that state - a list of Object-Location
-  pairs. (The hyphen is the prolog convention for representing pairs
-  but isn't special syntax - you can define your own "opearators",
-  which just become part of the pattern prolog matches against.
+  We need a way to hold an object and a location together, to
+  represent that the object is at that location. Rather than
+  use a verbose term like `object_location(Object, Location)`, we can
+  use a concise custom operator, @. Prolog conventionally uses a hyphen, `-`,
+  to denote a pair, but in this case the @ conveys the meaning more precisely.
+
+  This is a custom operator directive. It has no meaning to prolog,
+  It's used in pattern matching as part of the term's structure like
+  in non-operator pattern matching. This just tells prolog that we're
+  going to use the @ symbol in some of our terms so it doesn't think
+  it's a syntax error, and assigns it a precedence so prolog knows how
+  to group things when parsing a term containing multiple operators.
+
+  Object@Location denotes Object's placement at Location.
+*/
+op("@", xfx, 500).
+
+/*
+  To express the rest of the problem and its solution, which involves
+  moving objects around, i.e. changing the state of the world, our predicates
+  need to know the state of the world they're matched against,
+  and we need a data representation for the state of the world.
+  We'll represent it as a list of Object@Location, hiding that
+  representation using the following accessors.
 */
 
-%% Holds if in state S, Object is at Location.
-state_object_location(S, Object, Location) :-
-    member(Object-Location, S).
+%%%%%%%%%%%%%%% state accessors
 
-%% Holds if in state S, Objects are all t Location.
+%% state_placement(S, P).
+%% Holds if P is a placement in state S.
+state_placement(S, Placement)) :-
+    member(Placement, S).
+
+/*
+  state_placement_applied(Before, Placement, After).
+  Holds if, given an initial state Before,
+  applying Placement produces state After.
+*/
+state_placement_applied(Before, Placement, [Placement|Others]) :-
+    select(Placement, Before, Others).
+
+%% Holds if in state S, Objects are all placed at Location.
 state_location_objects(S, Location, Objects) :-
-    findall(Object, state_object_location(Object, Location), Objects).
+    findall(Object, state_placement_ok(S, Object@Location), Objects).
 
-%% Holds if, given an initial state, object and new location,
-%% newstate is the iniitial state with Object at Location.
-state_object_newlocation_newstate(S, Object, Loc, [Object-Loc|Others]) :-
-    select(Object-_, S, Others).
+%%%%%%%%%%%%%%%%
+
+/* The predicates below all depend on the state of the world,
+   so they'll all take the state as an argument, `S`. In the
+   case of a predicate that represents a state change,
+   the predicate will take two state arguments, `Before` and `After`.
+*/
+
+/*
+  Holds if in state S, Placement is a legal placement of
+  one of the movable objects.
+
+  This is the heart of the puzzle's logic. It captures the generation of
+  placements to try and determines which ones are legal given
+  the current state of the world.
+*/
+state_placement_ok(S, Object@To) :-
+
+    %% the item's location in state S
+    state_placement(S, Object@From),
+
+    %% there's a valid step from From to To defined for Object.
+    movable_step(Object, [From, To]),
+
+    %% The items already in location To
+    state_location_items(S, To, AlreadyThere),
+
+    %% We add Item to that list according to the rules of the puzzle.
+    location_items_ok(To, [Object|AlreadyThere]).
+
+%% And now the algorithm to find solutions.
+
+/*
+  We're on the home stretch. Now we need a simple algorithm to
+  generate valid solutions from the puzzle's initial state to
+  the goal state.
+*/
 
 %% Holds if S is the initial puzzle state.
 state_initial(S) :-
@@ -101,60 +202,25 @@ state_goal(S) :-
     state_location_objects(S, far, Items).
 
 /*
-  So how do we get from the initial state to the goal state?
-  The solution is a sequence of legal moves that transform
+  Holds if Moves is a sequence of legal moves that transform
   the initial state stepwise into the goal state.
 */
-
 solution(Moves) :-
     state_initial(Initial),
     state_goal(Goal),
     moves_from_to(Moves, Initial, Goal).
 
-%% moves_from_to(Moves, Initial, Goal).
-%% Holds if Moves is a sequence of legal moves that
-%% transform the Initial state into the Goal state.
+/*
+  moves_from_to(Moves, Initial, Goal).
+  Holds if Moves is a sequence of legal moves that
+  transform the Initial state into the Goal state.
+*/
 moves_from_to([], Goal, Goal),
 moves_from_to([First|Rest], Initial, Goal) :-
-    state_move_newstate(Initial, First, S),
+    move_before_after(First, Initial, S),
     moves_from_to(Rest, S, Goal).
 
-%% Holds if Move is a valid move from state Before to state After.
-state_move_newstate(Before, Move, After) :-
-    movable(Object),
-    state_can_move(Before, Object, From, To),
-    state_object_newlocation(After, Object, To).
-
-%% Holds if in state S, Item can legally move from location From to location To.
-state_can_move(S, Item, From, To) :-
-
-    %% the item must be at location From
-    state_object_location(S, Item, From),
-
-    %% From and To must be next to each other
-    state_location_location_reachable(S, From, To),
-
-    %% The items already in location To
-    state_location_items(S, To, AlreadyThere),
-
-    %% We can legallly add Item to that list.
-    location_items_ok(To, [Item|AlreadyThere]).
-
-%% state_location_adjacent(S, L1, L2).
-%% Holds if in state S, locationL1 is next to state L2,
-%% i.e. that an object can move from L1 to L2.
-
-state_location_location_reachable(_, boat, hands).
-state_location_location_reachable(_, hands, boat).
-
-state_location_location_reachable(S, boat, Shore) :-
-    state_object_location(S, boat, Shore).
-
-state_location_location_reachable(S, hands, Shore) :-
-    state_location_location_reachable(S, boat, Shore).
-
-state_location_location_reachable(S, Shore1, Shore2) :-
-    shore(Shore1),
-    shore(Shore2),
-    %% Disallow a move from a shore to itself or we'll could be here all day.
-    Shore1 \== Shore2.
+%% Holds if Move is a valid placement from state Before to state After.
+move_before_after(Move, Before, After) :-
+    state_placement_ok(After, Move),
+    state_placement_applied(Before, Move, After).
