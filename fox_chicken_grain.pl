@@ -26,9 +26,6 @@
   the river?
 */
 
-%% The four locations where the farmer can set items down.
-locations([shore(near), shore(far), boat, hands]).
-
 %% The four things in this puzzle world that can move.
 %% The farmer moves with the boat, so no need to represent his motion.
 movable(boat).
@@ -40,7 +37,7 @@ movable(item(chicken)).
   Now we need to define some rules about the physical world,
   i.e. how things are allowed to move.
 
-  Multiple ways we can represent this, but we'll define
+  Multiple ways we can represent this, but we'll definer
   each type of movable object's valid path through the locations.
 */
 
@@ -52,7 +49,7 @@ movable_path(Movable, Reverse) :-
     movable_path_(Movable, Path),
     reverse(Path, Reverse).
 
-%% An item can move from the shore to the farmer's hands into the boat and back.
+%% An item can move from shore => farmer's hands => boat, and back.
 movable_path_(item(_), [shore(_), hands, boat]).
 
 %% The boat can move from the near shore to the far shore and back.
@@ -143,7 +140,7 @@ state_placement_applied(Before, Placement, [Placement|Others]) :-
 
 %% Holds if in state S, Objects are all placed at Location.
 state_location_objects(S, Location, Objects) :-
-    findall(Object, state_placement_ok(S, Object@Location), Objects).
+    findall(Object, state_placement(S, Object@Location), Objects).
 
 %%%%%%%%%%%%%%%%
 
@@ -153,45 +150,41 @@ state_location_objects(S, Location, Objects) :-
    the predicate will take two state arguments, `Before` and `After`.
 */
 
-/*
-  Holds if in state S, Placement is a legal placement of
-  one of the movable objects.
+%% Holds if S is the initial puzzle state.
+state_initial(S) :-
+    state_all_at_location(S, shore(near)).
 
-  This is the heart of the puzzle's logic. It captures the generation of
-  placements to try and determines which ones are legal given
-  the current state of the world.
-*/
-state_placement_ok(S, Object@To) :-
+%% Holds if S is the gaol puzzle state.
+state_goal(S) :-
+    state_all_at_location(S, shore(far)).
+
+%% Holds if in state S, all movables are at Location.
+state_all_at_location(S, Location) :-
+    findall(M, movable(M), Movables),
+    state_location_objects(S, Shore, Movables).
+
+%% Holds if from state S, Object is physically able to move to location To.
+state_placement_possible(S, Object@To) :-
 
     %% the item's location in state S
     state_placement(S, Object@From),
 
-    %% there's a valid step from From to To defined for Object.
-    movable_step(Object, [From, To]),
+    %% there's a valid step From => To defined for Object's path.
+    movable_step(Object, [From, To]).
 
-    %% The items already in location To
+/*
+  Holds if in state S, Object can be placed in location To
+  according to the rules of the puzzle.
+*/
+state_placement_allowed(S, Object@To) :-
+
+    %% The items in location To
     state_location_items(S, To, AlreadyThere),
 
-    %% We add Item to that list according to the rules of the puzzle.
+    %% We can add Item to that list according to the rules of the puzzle.
     location_items_ok(To, [Object|AlreadyThere]).
 
 %% And now the algorithm to find solutions.
-
-/*
-  We're on the home stretch. Now we need a simple algorithm to
-  generate valid solutions from the puzzle's initial state to
-  the goal state.
-*/
-
-%% Holds if S is the initial puzzle state.
-state_initial(S) :-
-    items(Items),
-    state_location_objects(S, near, Items).
-
-%% Holds if S is the goal state of the puzzle.
-state_goal(S) :-
-    items(Items),
-    state_location_objects(S, far, Items).
 
 /*
   Holds if Moves is a sequence of legal moves that transform
@@ -214,5 +207,6 @@ moves_from_to([First|Rest], Initial, Goal) :-
 
 %% Holds if Move is a valid placement from state Before to state After.
 move_before_after(Move, Before, After) :-
-    state_placement_ok(After, Move),
+    state_placement_possible(Before, Move),
+    state_placement_allowed(After, Move),
     state_placement_applied(Before, Move, After).
