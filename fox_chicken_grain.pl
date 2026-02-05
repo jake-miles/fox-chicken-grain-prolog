@@ -4,27 +4,46 @@
 :- use_module(library(clpz)).
 
 /*
-  The fox, chicken and grain puzzle, in prolog using a
-  depth-first search of the problem space.
+  The fox, chicken and grain puzzle, in prolog.
 
   There's a farmer in a boat on the shore of a river.
   On the riverbank he has three items: a fox, a chicken and a bag of grain.
   He needs to get them all across the river.
 
-  The fox wants to eat the chicken, so they must always be kept apart.
-  The chicken wants to eat the grain, so they must always be kept apart.
+  The fox wants to eat the chicken, so they can't be left alone together.
+  The chicken wants to eat the grain, so they can't be left alone together.
 
-  The farmer is able to hold up to
-  two of the three items at a time, so wherever he is,
-  he can keep the fox from eating the chicken and the chicken from eating
-  the grain, but he can't leave them alone together.
+  Only one item at a time will fit in the boat with the farmer to
+  cross the river, and he needs both hands free to row the boat across
+  the river.
 
-  But he needs both hands to row the boat, and he can only fit
-  one item in the boat with him at a time.
-
-  What sequence of moves will let the farmer get the fox, chicken and grain across
-  the river?
+  How can the farmer get the fox, chicken and grain across the river?
 */
+
+/*
+  Prolog to the rescue.
+
+  The solution will be a sequence of moves, each of an item to a new
+  location.
+*/
+
+/*
+  For conciseness, we'll define a couple custom operators.
+  The custom operator has no meaning to prolog; It just becomes part
+  of a term's pattern as it's matched against other terms. The `op`
+  directive just tells prolog that we're going to use the symbol we're
+  defining in some of our terms so it doesn't think it's a syntax
+  error, and we assign it a precedence so prolog knows how to group
+  things when parsing a term containing multiple operators. The `xfx`
+  means it's an infix operator.
+*/
+
+%%  Object@Location denotes that an Object is at Location.
+:- op("@", xfx, 500).
+
+%% `From <-> To` denotes that locations `From` and `To` are one move away
+%% from each other.
+:- op(<->, xfx, 500).
 
 %% The four things in this puzzle world that can move.
 %% The farmer moves with the boat, so no need to represent his motion.
@@ -34,157 +53,117 @@ movable(item(chicken)).
 movable(item(chicken)).
 
 /*
-  Now we need to define some rules about the physical world,
-  i.e. how things are allowed to move.
-
-  Multiple ways we can represent this, but we'll definer
-  each type of movable object's valid path through the locations.
+  We need to model the physical world of the puzzle,
+  This includes which locations are one step away from
+  which others, and how many items each location can hold at once.
 */
 
-movable_path(Movable, Path) :-
-    movable_path_(Movable, Path).
+_movable_step(boat, shore(near) <-> shore(far)).
+_movable_step(item(_), shore(_) <-> hands).
+_movable_step(item(_), hands <-> boat).
 
-%% An object can move back and forth along its path.
-movable_path(Movable, Reverse) :-
-    movable_path_(Movable, Path),
-    reverse(Path, Reverse).
+movable_step(Movable, From <-> To) :-
+    %% semicolon means boolean-or. You put it at the beginning of
+    %% the line by convention so it stands out from the comma,
+    %% which means boolean-and.
+    (
+        _movable_step(Movable, From <-> To)
+    ;   _movable_step(Movable, To <-> From)
+    ).
 
-%% An item can move from shore => farmer's hands => boat, and back.
-movable_path_(item(_), [shore(_), hands, boat]).
+%% location_limit(Location, Limit)
+%% Holds if Location can hold at most Limit items.
+location_limit(boat, 1).
+location_limit(hands, 2).
+location_limit(shore(_), 3).
 
-%% The boat can move from the near shore to the far shore and back.
-movable_path_(boat, [shore(near), shore(far)]).
-
-movable_step(Movable, [From-To]) :-
-    movable_path(Movable, Path),
-    member([From-To], Path).
+%% Holds if Location can physically hold all the items in Items.
+location_items_fit(Location, Items) :-
+    %% comma means boolean-and
+    length(Items, Count),
+    location_limit(Location, Limit),
+    Count #=< Limit.
 
 /*
-  Now we represent the danger.
+  And the last component of the puzzle to model:
+  some of our items want to eat each other.
 */
+
+%% predator_prey(Predator, Prey).
+%% Holds if Predator will eat Prey if left alone with it.
 predator_prey(fox, chicken).
 predator_prey(chicken, grain).
 
+location_items_safe(hands, _).
+location_items_safe(boat, _).
+
+%% Items can be placed together on either shore
+%% as long as none of them want to eat each other.
+location_items_safe(shore(_), Items) :-
+    cartesian_product(Items, Items, Pairs),
+    %% prolog supports higher-order predicates like maplist.
+    maplist(not_predator_prey, Items).
+
+not_predator_prey(X-Y) :-
+    \+ predator_prey(X, Y).
+
+%% Holds if Items can coexist together at Location.
+location_items_ok(Location, Items) :-
+    location_items_fit(Location, Items),
+    location_items_safe(Location, Items).
+
 /*
-  location_items_ok(Location, Items).
-  Holds if Items can all exist at Location together
+  The predicates below all depend on the changing state of the world,
+  so they'll all take the state of the world as an argument, `S`. In
+  the case of a predicate that represents a state change, the
+  predicate will take two state arguments, `Before` and `After`.
+
+  The state representation is defined at the end of the file.
+  It's defined in terms of three accessors:
+
+  %% state_placement(S, Placement).
+  %% Holds if Placement is an Object@Location in state S.
+
+  %% state_placement_applied(Before, Placement, After).
+  %% Holds if, given an initial state Before,
+  %% applying Placement produces state After.
+
+  %% state_location_objects(S, Location, Objects)
+  %% Holds if in state S, Objects are all @Location.
+*/
+
+/*
+  This captures the logic of a valid next move.
+
+  Holds if from state S, Object can be placed in location `To`
   according to the rules of the puzzle.
 */
+state_placement_ok(S, Object@To) :-
 
-%% only one item in the boat at a time.
-location_items_ok(boat, Items) :-
-    list_length_lte(Items, 1).
+    %% Object is @From in state S.
+    state_placement(S, Object@From),
 
-%% at most 2 items in the farmer's hands at a time.
-location_items_ok(hands, Items) :-
-    list_length_lte(Items, 2).
+    %% From <-> To is one of Object's defined movable_steps.
+    movable_step(Object, From <-> To),
 
-%% Items can be placed together on a shore if they're all safe when left alone.
-location_items_ok(Location, Items) :-
-    shore(Location),
-    safe_alone(Items).
+    %% The items already in location To
+    state_location_items(S, To, AlreadyThere),
 
-%% Holds if items can be safely left alone together.
-safe_alone(Items) :-
-    maplist(safe_alone_(Items), Items).
+    %% it's ok to add Object to that list at location To.
+    location_items_ok(To, [Object|AlreadyThere]).
 
-safe_alone_(Items, item(Item)) :-
-    maplist(\OtherItem^(\+ predator_prey(Item, OtherItem))).
-
-%% Holds if list L has a length <= Max.
-list_length_lte(L, Max) :-
-    length(L, Length),
-    Length #=< Max.
-
-/*
-  We need a way to hold an object and a location together, to
-  represent that the object is at that location. Rather than
-  use a verbose term like `object_location(Object, Location)`, we can
-  use a concise custom operator, @. Prolog conventionally uses a hyphen, `-`,
-  to denote a pair, but in this case the @ conveys the meaning more precisely.
-
-  This is a custom operator directive. It has no meaning to prolog,
-  It's used in pattern matching as part of the term's structure like
-  in non-operator pattern matching. This just tells prolog that we're
-  going to use the @ symbol in some of our terms so it doesn't think
-  it's a syntax error, and assigns it a precedence so prolog knows how
-  to group things when parsing a term containing multiple operators.
-
-  Object@Location denotes Object's placement at Location.
-*/
-op("@", xfx, 500).
-
-/*
-  To express the rest of the problem and its solution, which involves
-  moving objects around, i.e. changing the state of the world, our predicates
-  need to know the state of the world they're matched against,
-  and we need a data representation for the state of the world.
-  We'll represent it as a list of Object@Location, hiding that
-  representation using the following accessors.
-*/
-
-%%%%%%%%%%%%%%% state accessors
-
-%% state_placement(S, P).
-%% Holds if P is a placement in state S.
-state_placement(S, Placement)) :-
-    member(Placement, S).
-
-/*
-  state_placement_applied(Before, Placement, After).
-  Holds if, given an initial state Before,
-  applying Placement produces state After.
-*/
-state_placement_applied(Before, Placement, [Placement|Others]) :-
-    select(Placement, Before, Others).
-
-%% Holds if in state S, Objects are all placed at Location.
-state_location_objects(S, Location, Objects) :-
-    findall(Object, state_placement(S, Object@Location), Objects).
-
-%%%%%%%%%%%%%%%%
-
-/* The predicates below all depend on the state of the world,
-   so they'll all take the state as an argument, `S`. In the
-   case of a predicate that represents a state change,
-   the predicate will take two state arguments, `Before` and `After`.
-*/
-
-%% Holds if S is the initial puzzle state.
+%% S is the initial puzzle state.
 state_initial(S) :-
     state_all_at_location(S, shore(near)).
 
-%% Holds if S is the gaol puzzle state.
+%% S is the goal puzzle state.
 state_goal(S) :-
     state_all_at_location(S, shore(far)).
 
 %% Holds if in state S, all movables are at Location.
 state_all_at_location(S, Location) :-
     findall(M, movable(M), Movables),
-    state_location_objects(S, Shore, Movables).
-
-%% Holds if from state S, Object is physically able to move to location To.
-state_placement_possible(S, Object@To) :-
-
-    %% the item's location in state S
-    state_placement(S, Object@From),
-
-    %% there's a valid step From => To defined for Object's path.
-    movable_step(Object, [From, To]).
-
-/*
-  Holds if in state S, Object can be placed in location To
-  according to the rules of the puzzle.
-*/
-state_placement_allowed(S, Object@To) :-
-
-    %% The items in location To
-    state_location_items(S, To, AlreadyThere),
-
-    %% We can add Item to that list according to the rules of the puzzle.
-    location_items_ok(To, [Object|AlreadyThere]).
-
-%% And now the algorithm to find solutions.
+    state_location_objects(S, Location, Movables).
 
 /*
   Holds if Moves is a sequence of legal moves that transform
@@ -194,6 +173,8 @@ solution(Moves) :-
     state_initial(Initial),
     state_goal(Goal),
     moves_from_to(Moves, Initial, Goal).
+
+%% And now the simple algorithm to find solutions.
 
 /*
   moves_from_to(Moves, Initial, Goal).
@@ -205,8 +186,41 @@ moves_from_to([First|Rest], Initial, Goal) :-
     move_before_after(First, Initial, S),
     moves_from_to(Rest, S, Goal).
 
-%% Holds if Move is a valid placement from state Before to state After.
+%% Holds if Move is a valid placement moving from state Before to
+%% state After.
 move_before_after(Move, Before, After) :-
-    state_placement_possible(Before, Move),
-    state_placement_allowed(After, Move),
+    state_placement_ok(After, Move),
     state_placement_applied(Before, Move, After).
+
+
+%%%%%%%%%%%%%%% state accessors
+%% State is a list of placements, i.e. of Object@Location terms.
+
+%% state_placement(S, Placement).
+%% Holds if Placement is an Object@Location in state S.
+state_placement(S, Placement)) :-
+    member(Placement, S).
+
+/*
+  state_placement_applied(Before, Placement, After).
+  Holds if, given an initial state Before,
+  applying Placement produces state After.
+*/
+state_placement_applied(Before, Placement, [Placement|Others]) :-
+    %% Others is Before without Placement
+    select(Placement, Before, Others).
+
+%% Holds if in state S, Objects are all placed at Location.
+state_location_objects(S, Location, Objects) :-
+    findall(Object, state_placement(S, Object@Location), Objects).
+
+%%%%%%%%%%%%%%%%
+
+%% Holds if Product is a list of all pairings of the elements of Xs and Ys.
+cartesian_product(Xs, Ys, Product) :-
+    findall(X-Y,
+            (
+             member(X, Xs),
+             member(Y, Ys)
+            ),
+            Product).
