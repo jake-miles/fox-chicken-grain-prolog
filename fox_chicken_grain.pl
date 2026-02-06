@@ -2,6 +2,7 @@
 :- use_module(library(lists)).
 :- use_module(library(reif)).
 :- use_module(library(clpz)).
+:- use_module(library(pairs)).
 
 /*
   The fox, chicken and grain puzzle, in prolog.
@@ -38,19 +39,27 @@
   means it's an infix operator.
 */
 
-%%  Object@Location denotes that an Object is at Location.
-:- op("@", xfx, 500).
-
-%% `From <-> To` denotes that locations `From` and `To` are one move away
-%% from each other.
-:- op(<->, xfx, 500).
+item(fox).
+item(chicken).
+item(grain).
 
 %% The four things in this puzzle world that can move.
 %% The farmer moves with the boat, so no need to represent his motion.
 movable(boat).
-movable(item(fox)).
-movable(item(chicken)).
-movable(item(chicken)).
+movable(X) :-
+    item(X).
+
+/*
+  ?- movable(X).
+  %@    X = boat
+  %@ ;  X = fox
+  %@ ;  X = chicken
+  %@ ;  X = grain.
+
+  ?- findall(X, movable(X), Xs).
+  %@    Xs = [boat,fox,chicken,grain].
+*/
+
 
 /*
   We need to model the physical world of the puzzle,
@@ -58,18 +67,34 @@ movable(item(chicken)).
   which others, and how many items each location can hold at once.
 */
 
-_movable_step(boat, shore(near) <-> shore(far)).
-_movable_step(item(_), shore(_) <-> hands).
-_movable_step(item(_), hands <-> boat).
+movable_step_(boat, [shore(near), shore(far)]).
+movable_step_(item(_), [shore(_), hands]).
+movable_step_(item(_), [hands, boat]).
 
-movable_step(Movable, From <-> To) :-
+movable_step(Movable, [From, To]) :-
     %% semicolon means boolean-or. You put it at the beginning of
     %% the line by convention so it stands out from the comma,
     %% which means boolean-and.
     (
-        _movable_step(Movable, From <-> To)
-    ;   _movable_step(Movable, To <-> From)
+        movable_step_(Movable, [From, To])
+    ;   movable_step_(Movable, [To, From])
     ).
+
+/*
+  ?- movable_step(boat, [X, Y]).
+  %@    X = shore(near), Y = shore(far)
+  %@ ;  X = shore(far), Y = shore(near).
+
+  ?- movable_step(item(chicken), [X, Y]).
+  %@    X = shore(_A), Y = hands
+  %@ ;  X = hands, Y = boat
+  %@ ;  X = hands, Y = shore(_A)
+  %@ ;  X = boat, Y = hands.
+
+  ?- movable_step(item(chicken), [shore(near), Y]).
+  %@    Y = hands
+  %@ ;  false.
+*/
 
 %% location_limit(Location, Limit)
 %% Holds if Location can hold at most Limit items.
@@ -83,6 +108,15 @@ location_items_fit(Location, Items) :-
     length(Items, Count),
     location_limit(Location, Limit),
     Count #=< Limit.
+
+/*
+  ?- location_items_fit(boat, [item(fox), item(chicken), item(grain)]).
+  %@    false.
+  ?- location_items_fit(boat, [item(fox)]).
+  %@    true.
+  ?- location_items_fit(shore(near), [item(fox), item(chicken), item(grain)]).
+  %@    true.
+*/
 
 /*
   And the last component of the puzzle to model:
@@ -104,13 +138,26 @@ location_items_safe(shore(_), Items) :-
     %% prolog supports higher-order predicates like maplist.
     maplist(not_predator_prey, Items).
 
-not_predator_prey(X-Y) :-
-    \+ predator_prey(X, Y).
+not_predator_prey(X-Y) :- \+ predator_prey(X, Y).
 
 %% Holds if Items can coexist together at Location.
 location_items_ok(Location, Items) :-
     location_items_fit(Location, Items),
     location_items_safe(Location, Items).
+
+/*
+  ?- location_items_ok(boat, [fox, chicken]).
+  %@    false.
+  ?- location_items_ok(boat, [fox]).
+  %@    true.
+  ?- location_items_ok(hands, [fox, chicken]).
+  %@    true.
+  ?- location_items_ok(hands, [fox, chicken, grain]).
+  %@    false.
+  ?- location_items_ok(shore(_), [fox, chicken]).
+
+*/
+
 
 /*
   The predicates below all depend on the changing state of the world,
@@ -138,13 +185,13 @@ location_items_ok(Location, Items) :-
   Holds if from state S, Object can be placed in location `To`
   according to the rules of the puzzle.
 */
-state_placement_ok(S, Object@To) :-
+state_placement_ok(S, at(Object, To)) :-
 
     %% Object is @From in state S.
-    state_placement(S, Object@From),
+    state_placement(S, at(Object, From)),
 
-    %% From <-> To is one of Object's defined movable_steps.
-    movable_step(Object, From <-> To),
+    %% [From, To] is one of Object's defined movable_steps.
+    movable_step(Object, [From, To]),
 
     %% The items already in location To
     state_location_items(S, To, AlreadyThere),
@@ -198,7 +245,7 @@ move_before_after(Move, Before, After) :-
 
 %% state_placement(S, Placement).
 %% Holds if Placement is an Object@Location in state S.
-state_placement(S, Placement)) :-
+state_placement(S, Placement) :-
     member(Placement, S).
 
 /*
@@ -212,7 +259,7 @@ state_placement_applied(Before, Placement, [Placement|Others]) :-
 
 %% Holds if in state S, Objects are all placed at Location.
 state_location_objects(S, Location, Objects) :-
-    findall(Object, state_placement(S, Object@Location), Objects).
+    findall(Object, state_placement(S, at(Object, Location)), Objects).
 
 %%%%%%%%%%%%%%%%
 
