@@ -1,8 +1,5 @@
-:- use_module(library(builtins)).
-:- use_module(library(lists)).
-:- use_module(library(reif)).
-:- use_module(library(clpz)).
-:- use_module(library(pairs)).
+:- use_module(library(apply)).
+:- use_module(library(clpfd)).
 
 /*
   The fox, chicken and grain puzzle, in prolog.
@@ -51,10 +48,10 @@ movable(X) :-
 
 /*
   ?- movable(X).
-  %@    X = boat
-  %@ ;  X = fox
-  %@ ;  X = chicken
-  %@ ;  X = grain.
+  %@ X = boat ;
+  %@ X = fox ;
+  %@ X = chicken ;
+  %@ X = grain.
 
   ?- findall(X, movable(X), Xs).
   %@    Xs = [boat,fox,chicken,grain].
@@ -136,7 +133,7 @@ location_items_safe(boat, _).
 location_items_safe(shore(_), Items) :-
     cartesian_product(Items, Items, Pairs),
     %% prolog supports higher-order predicates like maplist.
-    maplist(not_predator_prey, Items).
+    maplist(not_predator_prey, Pairs).
 
 not_predator_prey(X-Y) :- \+ predator_prey(X, Y).
 
@@ -179,6 +176,11 @@ location_items_ok(Location, Items) :-
   %% Holds if in state S, Objects are all @Location.
 */
 
+%% the boat can always move to the opposite shore
+state_placement_ok(S, at(boat, shore(Shore1))) :-
+    state_object_location(S, boat, shore(Shore0)),
+    Shore0 =\= Shore1.
+
 /*
   This captures the logic of a valid next move.
 
@@ -186,6 +188,7 @@ location_items_ok(Location, Items) :-
   according to the rules of the puzzle.
 */
 state_placement_ok(S, at(Object, To)) :-
+    item(Object),
 
     %% Object is @From in state S.
     state_placement(S, at(Object, From)),
@@ -221,17 +224,17 @@ solution(Moves) :-
     state_goal(Goal),
     moves_from_to(Moves, Initial, Goal).
 
-%% And now the simple algorithm to find solutions.
+%% And now a simple algorithm to find solutions.
 
 /*
   moves_from_to(Moves, Initial, Goal).
   Holds if Moves is a sequence of legal moves that
   transform the Initial state into the Goal state.
 */
-moves_from_to([], Goal, Goal),
+moves_from_to([], Goal, Goal).
 moves_from_to([First|Rest], Initial, Goal) :-
-    move_before_after(First, Initial, S),
-    moves_from_to(Rest, S, Goal).
+    move_before_after(First, Initial, S0),
+    moves_from_to(Rest, S0, Goal).
 
 %% Holds if Move is a valid placement moving from state Before to
 %% state After.
@@ -257,9 +260,16 @@ state_placement_applied(Before, Placement, [Placement|Others]) :-
     %% Others is Before without Placement
     select(Placement, Before, Others).
 
+state_object_location(S, Object, Location) :-
+    state_placement(S, at(Object, Location)).
+
 %% Holds if in state S, Objects are all placed at Location.
 state_location_objects(S, Location, Objects) :-
-    findall(Object, state_placement(S, at(Object, Location)), Objects).
+    findall(Object, state_object_location(S, Object, Location), Objects).
+
+state_location_items(S, Location, Items) :-
+    state_location_objects(S, Location, Objects),
+    include(item, Objects, Items).
 
 %%%%%%%%%%%%%%%%
 
