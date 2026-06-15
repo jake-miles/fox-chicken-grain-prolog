@@ -1,6 +1,3 @@
-:- use_module(library(apply)).
-:- use_module(library(clpfd)).
-
 /*
   The fox, chicken and grain puzzle, in prolog.
 
@@ -16,268 +13,157 @@
   the river.
 
   How can the farmer get the fox, chicken and grain across the river?
-*/
+  */
 
-/*
-  Prolog to the rescue.
-
-  The solution will be a sequence of moves, each of an item to a new
-  location.
-*/
-
-/*
-  For conciseness, we'll define a couple custom operators.
-  The custom operator has no meaning to prolog; It just becomes part
-  of a term's pattern as it's matched against other terms. The `op`
-  directive just tells prolog that we're going to use the symbol we're
-  defining in some of our terms so it doesn't think it's a syntax
-  error, and we assign it a precedence so prolog knows how to group
-  things when parsing a term containing multiple operators. The `xfx`
-  means it's an infix operator.
-*/
-
-item(fox).
-item(chicken).
-item(grain).
-
-%% The four things in this puzzle world that can move.
-%% The farmer moves with the boat, so no need to represent his motion.
-movable(boat).
-movable(X) :-
-    item(X).
-
-/*
-  ?- movable(X).
-  %@ X = boat ;
-  %@ X = fox ;
-  %@ X = chicken ;
-  %@ X = grain.
-
-  ?- findall(X, movable(X), Xs).
-  %@    Xs = [boat,fox,chicken,grain].
-*/
+:- use_module(library(apply)).
+:- use_module(library(clpfd)).
+:- use_module(yall).
 
 
-/*
-  We need to model the physical world of the puzzle,
-  This includes which locations are one step away from
-  which others, and how many items each location can hold at once.
-*/
+% first, let's meet prolog by defining a couple list operations we'll use.
 
-movable_step_(boat, [shore(near), shore(far)]).
-movable_step_(item(_), [shore(_), hands]).
-movable_step_(item(_), [hands, boat]).
+member(X, [X|_]).
+member(X, [_|T]) :-
+    member(X, T).
 
-movable_step(Movable, [From, To]) :-
-    %% semicolon means boolean-or. You put it at the beginning of
-    %% the line by convention so it stands out from the comma,
-    %% which means boolean-and.
-    (
-        movable_step_(Movable, [From, To])
-    ;   movable_step_(Movable, [To, From])
-    ).
+pairs_key_value(Pairs, Key, Value) :-
+    member(Key-Value, Pairs).
 
-/*
-  ?- movable_step(boat, [X, Y]).
-  %@    X = shore(near), Y = shore(far)
-  %@ ;  X = shore(far), Y = shore(near).
+pairs_key_value_updated(Pairs, Key, Value, [Key-Value|Others]) :-
+    exclude([Key-_], Pairs, Others).
 
-  ?- movable_step(item(chicken), [X, Y]).
-  %@    X = shore(_A), Y = hands
-  %@ ;  X = hands, Y = boat
-  %@ ;  X = hands, Y = shore(_A)
-  %@ ;  X = boat, Y = hands.
+pairs_value_keys(Pairs, Value, Keys) :-
+    findall(Key, pairs_key_value(Pairs, Key, Value), Keys).
 
-  ?- movable_step(item(chicken), [shore(near), Y]).
-  %@    Y = hands
-  %@ ;  false.
-*/
 
-%% location_limit(Location, Limit)
-%% Holds if Location can hold at most Limit items.
-location_limit(boat, 1).
-location_limit(hands, 2).
-location_limit(shore(_), 3).
+% model the problem.
 
-%% Holds if Location can physically hold all the items in Items.
-location_items_fit(Location, Items) :-
-    %% comma means boolean-and
-    length(Items, Count),
-    location_limit(Location, Limit),
-    Count #=< Limit.
+% three items
+items([fox, chicken, grain]).
 
-/*
-  ?- location_items_fit(boat, [item(fox), item(chicken), item(grain)]).
-  %@    false.
-  ?- location_items_fit(boat, [item(fox)]).
-  %@    true.
-  ?- location_items_fit(shore(near), [item(fox), item(chicken), item(grain)]).
-  %@    true.
-*/
+% four total objects we can move around
+objects([boat|Items]) :-
+    items(Items).
 
-/*
-  And the last component of the puzzle to model:
-  some of our items want to eat each other.
-*/
-
-%% predator_prey(Predator, Prey).
-%% Holds if Predator will eat Prey if left alone with it.
+% what eats what.
 predator_prey(fox, chicken).
 predator_prey(chicken, grain).
 
-location_items_safe(hands, _).
-location_items_safe(boat, _).
+state_initial(S) :- state_location_has_all_objects(S, near).
+state_desired(S) :- state_location_has_all_objects(S, far).
 
-%% Items can be placed together on either shore
-%% as long as none of them want to eat each other.
-location_items_safe(shore(_), Items) :-
-    cartesian_product(Items, Items, Pairs),
-    %% prolog supports higher-order predicates like maplist.
-    maplist(not_predator_prey, Pairs).
+state_location_has_all_objects(S, Location) :-
+    objects(Objects),
+    state_location_objects(S, Location, Objects).
 
-not_predator_prey(X-Y) :- \+ predator_prey(X, Y).
+% We're going to solve the problem by moving things around one at a time.
+% So we need to model moves: how the different objects can move,
+% which changes depending on the current state of the world.
 
-%% Holds if Items can coexist together at Location.
-location_items_ok(Location, Items) :-
-    location_items_fit(Location, Items),
-    location_items_safe(Location, Items).
+% So we need to represent the state of the world,
+% which we will transform step by step to achieve the goal.
+% The world will be a list of Object-Location pairs,
+% denoting where each object is in that state.
 
-/*
-  ?- location_items_ok(boat, [fox, chicken]).
-  %@    false.
-  ?- location_items_ok(boat, [fox]).
-  %@    true.
-  ?- location_items_ok(hands, [fox, chicken]).
-  %@    true.
-  ?- location_items_ok(hands, [fox, chicken, grain]).
-  %@    false.
-  ?- location_items_ok(shore(_), [fox, chicken]).
-
-*/
-
-
-/*
-  The predicates below all depend on the changing state of the world,
-  so they'll all take the state of the world as an argument, `S`. In
-  the case of a predicate that represents a state change, the
-  predicate will take two state arguments, `Before` and `After`.
-
-  The state representation is defined at the end of the file.
-  It's defined in terms of three accessors:
-
-  %% state_placement(S, Placement).
-  %% Holds if Placement is an Object@Location in state S.
-
-  %% state_placement_applied(Before, Placement, After).
-  %% Holds if, given an initial state Before,
-  %% applying Placement produces state After.
-
-  %% state_location_objects(S, Location, Objects)
-  %% Holds if in state S, Objects are all @Location.
-*/
-
-%% the boat can always move to the opposite shore
-state_placement_ok(S, at(boat, shore(Shore1))) :-
-    state_object_location(S, boat, shore(Shore0)),
-    Shore0 =\= Shore1.
-
-/*
-  This captures the logic of a valid next move.
-
-  Holds if from state S, Object can be placed in location `To`
-  according to the rules of the puzzle.
-*/
-state_placement_ok(S, at(Object, To)) :-
-    item(Object),
-
-    %% Object is @From in state S.
-    state_placement(S, at(Object, From)),
-
-    %% [From, To] is one of Object's defined movable_steps.
-    movable_step(Object, [From, To]),
-
-    %% The items already in location To
-    state_location_items(S, To, AlreadyThere),
-
-    %% it's ok to add Object to that list at location To.
-    location_items_ok(To, [Object|AlreadyThere]).
-
-%% S is the initial puzzle state.
-state_initial(S) :-
-    state_all_at_location(S, shore(near)).
-
-%% S is the goal puzzle state.
-state_goal(S) :-
-    state_all_at_location(S, shore(far)).
-
-%% Holds if in state S, all movables are at Location.
-state_all_at_location(S, Location) :-
-    findall(M, movable(M), Movables),
-    state_location_objects(S, Location, Movables).
-
-/*
-  Holds if Moves is a sequence of legal moves that transform
-  the initial state stepwise into the goal state.
-*/
-solution(Moves) :-
-    state_initial(Initial),
-    state_goal(Goal),
-    moves_from_to(Moves, Initial, Goal).
-
-%% And now a simple algorithm to find solutions.
-
-/*
-  moves_from_to(Moves, Initial, Goal).
-  Holds if Moves is a sequence of legal moves that
-  transform the Initial state into the Goal state.
-*/
-moves_from_to([], Goal, Goal).
-moves_from_to([First|Rest], Initial, Goal) :-
-    move_before_after(First, Initial, S0),
-    moves_from_to(Rest, S0, Goal).
-
-%% Holds if Move is a valid placement moving from state Before to
-%% state After.
-move_before_after(Move, Before, After) :-
-    state_placement_ok(After, Move),
-    state_placement_applied(Before, Move, After).
-
-
-%%%%%%%%%%%%%%% state accessors
-%% State is a list of placements, i.e. of Object@Location terms.
-
-%% state_placement(S, Placement).
-%% Holds if Placement is an Object@Location in state S.
-state_placement(S, Placement) :-
-    member(Placement, S).
-
-/*
-  state_placement_applied(Before, Placement, After).
-  Holds if, given an initial state Before,
-  applying Placement produces state After.
-*/
-state_placement_applied(Before, Placement, [Placement|Others]) :-
-    %% Others is Before without Placement
-    select(Placement, Before, Others).
+% Define the data representaion and encapsulate it by defining accessors:
 
 state_object_location(S, Object, Location) :-
-    state_placement(S, at(Object, Location)).
+    pairs_key_value(S, Object, Location).
 
-%% Holds if in state S, Objects are all placed at Location.
 state_location_objects(S, Location, Objects) :-
-    findall(Object, state_object_location(S, Object, Location), Objects).
+    pairs_value_keys(S, Location, Objects).
 
-state_location_items(S, Location, Items) :-
-    state_location_objects(S, Location, Objects),
-    include(item, Objects, Items).
+% represent a move with a term `object_to(Object, Location)`
+state_move_applied(S, object_to(Object, Location), Updated) :-
+    pairs_key_value_updated(S, Object, Location, Updated).
 
-%%%%%%%%%%%%%%%%
+% What is the definition of a solution to the puzzle?
 
-%% Holds if Product is a list of all pairings of the elements of Xs and Ys.
-cartesian_product(Xs, Ys, Product) :-
-    findall(X-Y,
-            (
-             member(X, Xs),
-             member(Y, Ys)
-            ),
-            Product).
+solution(Moves) :-
+  state_initial(Before),
+  state_desired(After),
+  moves_before_after(Moves, Before, After).
+
+% if before and after are the same state, the list of required moves is empty.
+moves_before_after([], State, State).
+
+% otherwise, there's some first move, `First` that transforms state `Start`
+% into some new state `Start1`, and a list of subsequent moves, `Rest`,
+% that transform `Start1` into `Goal`.
+moves_before_after([First|Rest], Start, Goal) :-
+  move_before_after(First, Start, Start1),
+  moves_before_after(Rest, Start1, Goal).
+
+% Represent a move with a structure `object_to(Object, Location)`,
+% relating an object to the location it moves to.
+
+move_before_after(Move, Before, After) :-
+    state_move_error(Before, Move, none),
+    state_move_applied(Before, Move, After).
+
+% two types of moves: moving the boat, and moving an item.
+
+% moving the boat to the other shore
+state_move_error(S, object_to(boat, OtherShore), Error) :-
+    state_object_location(S, boat, Shore),
+    other_shore(OtherShore, Shore),
+    validate(state_hands_empty(S), "Farmer's hands are not empty", Error).
+
+% moving an item
+state_move_error(S, object_to(Item, To), Error) :-
+    item(Item),
+    state_object_location(S, Item, From),
+    state_locations_adjacent(S, From, To),
+    state_location_objects(S, To, ItemsAlreadyThere),
+    location_items_ok(To, [Item|ItemsAlreadyThere], Error).
+
+validate(Goal, Message, Error) :-
+    if_(call(Goal),
+        Error = none,
+        Error = Message).
+
+item(Item) :-
+    items(Items),
+    member(Item, Items).
+
+other_shore(X, Y) :-
+    shore(X),
+    shore(Y),
+    X \== Y.
+
+shore(near).
+shore(far).
+
+state_hands_empty(S) :-
+    state_location_objects(S, hands, []).
+
+state_locations_adjacent(_, boat, hands).
+
+state_locations_adjacent(S, hands, Shore) :-
+    state_object_location(S, boat, Shore).
+
+location_items_ok(Location, Items, Error) :-
+    location_items_fit(Location, Items, Error),
+    items_safe_together(Items).
+
+location_items_fit(Location, Items, Error) :-
+    location_capacity(Location, C),
+    length(Items, L),
+    validate(C #> L, "", Error).
+
+location_capacity(Location, Capacity) :-
+    location_capacities(LCs),
+    member([Location, Capacity], LCs).
+
+location_capacities([near-3, far-3, boat-1, hands-2]).
+
+items_safe_together(Items) :-
+    list_cartesian_pairs(Items, Pairs),
+    maplist(item_item_safe_together, Pairs).
+
+item_item_safe_together(X, Y) :-
+    \+ predator_prey(X, Y),
+    \+ predator_prey(Y, X).
+
+list_cartesian_pairs(Xs, Product) :-
+    maplist(maplist(X,Y >> [X, Y], Xs), Xs, Product).
