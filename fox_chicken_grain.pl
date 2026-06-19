@@ -19,7 +19,7 @@
 location(near).
 location(far).
 location(boat).
-location(hands).
+location(farmer).
 
 %?- location(boat).
 
@@ -28,9 +28,6 @@ location(hands).
 %?- location(X).
 
 %?- findall(X, location(X), Locations).
-
-locations(Locations) :-
-    findall(X, location(X), Locations).
 
 % what eats what.
 predator_prey(fox, chicken).
@@ -61,11 +58,6 @@ state_final([fox-far, chicken-far, grain-far, boat-far]).
 %?- state_start([fox-F|_]).
 
 %?- state_start([_, chicken-C|_]).
-
-state_state_equal(S1, S2) :-
-    keysort(S1, Sorted1),
-    keysort(S2, Sorted2),
-    Sorted1 = Sorted2.
 
 % ?- state_start(S), state_state_equal(S, S).
 
@@ -208,7 +200,7 @@ state_move_applied(Before, object_to(Object, Location), After) :-
     location(Location),
     state_object_location_updated(Before, Object, Location, After).
 
-%?- state_start(S), state_move_applied(S, object_to(fox, hands), NewState).
+%?- state_start(S), state_move_applied(S, object_to(fox, farmer), NewState).
 
 %%%% clicking Move applies the move, rerendering the page and displaying the sequence of states so far.
 
@@ -216,19 +208,19 @@ state_move_applied(Before, object_to(Object, Location), After) :-
 
 % we can cross the river, or move an item.
 
-state_move_valid(S, Move) :-
-    state_move(S, Move),
+state_move(S, Move) :-
+    state_move_potential(S, Move),
     Move = object_to(Object, To),
     state_object_location_updated(S, Object, To, Updated),
     state_ok(Updated).
 
-state_move(S, object_to(boat, OtherShore)) :-
+state_move_potential(S, object_to(boat, OtherShore)) :-
     state_object_location(S, boat, Shore),
     shore(OtherShore),
     dif(Shore, OtherShore),
-    state_location_objects(S, hands, []).
+    state_location_objects(S, farmer, []).
 
-state_move(S, object_to(Item, To)) :-
+state_move_potential(S, object_to(Item, To)) :-
 
     state_item(S, Item),
 
@@ -239,31 +231,41 @@ state_move(S, object_to(Item, To)) :-
     % Item must come from one of the connected locations
     state_object_location(S, Item, From).
 
+shore(S) :- member(S, [near, far]).
+
+shore_from_to_for_item(Shore, From, To) :-
+    member(From-To, [Shore-farmer, farmer-boat, boat-farmer, farmer-Shore]).
+
+% ?- findall(To, shore_from_to_for_item(near, farmer, To), Tos).
+
+% ?- findall(To, shore_from_to_for_item(near, near, To), Tos).
+
+% ?- findall(To, shore_from_to_for_item(near, boat, To), Tos).
+
+% ?- state_start(S), state_move_potential(S, object_to(fox, farmer)).
+
 % the final state isn't actually valid, but that's the end of the puzzle.
 state_ok(S) :-
     state_final(F),
     state_state_equal(S, F).
 
 state_ok(S) :-
+    state_location_object_pairs(S, ObjectsByLocation),
+    maplist(location_objects_pair_ok, ObjectsByLocation).
+
+state_location_object_pairs(S, ObjectsByLocation) :-
     findall(L-Objects,
             (location(L), state_location_objects(S, L, Objects)),
-            ObjectsByLocation),
-    maplist(location_objects_pair_ok, ObjectsByLocation).
+            ObjectsByLocation).
+
+state_state_equal(S1, S2) :-
+    keysort(S1, Sorted1),
+    keysort(S2, Sorted2),
+    Sorted1 = Sorted2.
 
 location_objects_pair_ok(Location-Objects) :-
     location_objects_fit(Location, Objects),
     location_objects_safe_together(Location, Objects).
-
-shore(S) :- member(S, [near, far]).
-
-shore_from_to_for_item(Shore, From, To) :-
-    member(From-To, [Shore-hands, hands-boat, boat-hands, hands-Shore]).
-
-% ?- findall(To, shore_from_to_for_item(near, hands, To), Tos).
-
-% ?- findall(To, shore_from_to_for_item(near, near, To), Tos).
-
-% ?- findall(To, shore_from_to_for_item(near, boat, To), Tos).
 
 % the To location must be able to hold the item along with
 % the items already there
@@ -274,7 +276,7 @@ location_objects_fit(Location, Objects) :-
     C #>= L.
 
 location_capacity(boat, 1).
-location_capacity(hands, 2).
+location_capacity(farmer, 2).
 location_capacity(Shore, 4) :-
     shore(Shore).
 
@@ -286,11 +288,11 @@ location_capacity(Shore, 4) :-
 
 % and, of course, we can't let anyone eat anything.
 
-% hands is really two locations modeled as one.
-location_objects_safe_together(hands, _).
+% farmer is really two locations modeled as one.
+location_objects_safe_together(farmer, _).
 
 location_objects_safe_together(Location, Objects) :-
-    Location \= hands,
+    Location \= farmer,
     list_list_cartesian_pairs(Objects, Objects, Pairs),
     maplist(item_pair_safe, Pairs).
 
@@ -322,7 +324,7 @@ item_pair_safe(X-Y) :-
 
 % ?- objects_safe_together([grain, fox]).
 
-% ?- location_objects_pair_ok(hands-[fox, chicken]).
+% ?- location_objects_pair_ok(farmer-[fox, chicken]).
 
 % ?- location_objects_pair_ok(near-[fox, chicken]).
 
@@ -332,14 +334,22 @@ item_pair_safe(X-Y) :-
 
 %%% web page displays validation message
 
-% ?- state_start(S), state_move(S, Move).
+% ?- state_start(S), state_move(S, object_to(fox, farmer)).
+
+% ?- state_start(S), state_move(S, object_to(grain, farmer)).
+
+% ?- state_start(S), state_move(S, object_to(boat, far)).
+
+% ?- state_start(S), state_move(S, object_to(chicken, farmer)).
+
+%%% user is trying things that can't work. can we limit the options in the ui?
 
 state_moves_valid(S, Moves) :-
-    findall(Move, state_move_valid(S, Move), Moves).
+    findall(Move, state_move(S, Move), Moves).
 
 % ?- state_start(S), state_moves_valid(S, Moves).
 
-% ?- state_start(S), state_move_applied(S, object_to(chicken, hands), S1), state_moves_valid(S1, Moves1).
+% ?- state_start(S), state_move_applied(S, object_to(chicken, farmer), S1), state_moves_valid(S1, Moves1).
 
 %%% web page displays single pulldown of valid moves
 
@@ -385,31 +395,3 @@ print_nl(X) :-
 
 
 % ?- solution(S), maplist(print_nl, S).
-%@ object_to(chicken,hands)-[chicken-hands,fox-near,grain-near,boat-near]
-%@ object_to(chicken,boat)-[chicken-boat,fox-near,grain-near,boat-near]
-%@ object_to(boat,far)-[boat-far,chicken-boat,fox-near,grain-near]
-%@ object_to(chicken,hands)-[chicken-hands,boat-far,fox-near,grain-near]
-%@ object_to(chicken,far)-[chicken-far,boat-far,fox-near,grain-near]
-%@ object_to(boat,near)-[boat-near,chicken-far,fox-near,grain-near]
-%@ object_to(fox,hands)-[fox-hands,boat-near,chicken-far,grain-near]
-%@ object_to(fox,boat)-[fox-boat,boat-near,chicken-far,grain-near]
-%@ object_to(boat,far)-[boat-far,fox-boat,chicken-far,grain-near]
-%@ object_to(fox,hands)-[fox-hands,boat-far,chicken-far,grain-near]
-%@ object_to(chicken,hands)-[chicken-hands,fox-hands,boat-far,grain-near]
-%@ object_to(chicken,boat)-[chicken-boat,fox-hands,boat-far,grain-near]
-%@ object_to(fox,far)-[fox-far,chicken-boat,boat-far,grain-near]
-%@ object_to(boat,near)-[boat-near,fox-far,chicken-boat,grain-near]
-%@ object_to(chicken,hands)-[chicken-hands,boat-near,fox-far,grain-near]
-%@ object_to(grain,hands)-[grain-hands,chicken-hands,boat-near,fox-far]
-%@ object_to(grain,boat)-[grain-boat,chicken-hands,boat-near,fox-far]
-%@ object_to(chicken,near)-[chicken-near,grain-boat,boat-near,fox-far]
-%@ object_to(boat,far)-[boat-far,chicken-near,grain-boat,fox-far]
-%@ object_to(grain,hands)-[grain-hands,boat-far,chicken-near,fox-far]
-%@ object_to(grain,far)-[grain-far,boat-far,chicken-near,fox-far]
-%@ object_to(boat,near)-[boat-near,grain-far,chicken-near,fox-far]
-%@ object_to(chicken,hands)-[chicken-hands,boat-near,grain-far,fox-far]
-%@ object_to(chicken,boat)-[chicken-boat,boat-near,grain-far,fox-far]
-%@ object_to(boat,far)-[boat-far,chicken-boat,grain-far,fox-far]
-%@ object_to(chicken,hands)-[chicken-hands,boat-far,grain-far,fox-far]
-%@ object_to(chicken,far)-[chicken-far,boat-far,grain-far,fox-far]
-%@ S = [object_to(chicken, hands)-[chicken-hands, fox-near, grain-near, boat-near], object_to(chicken, boat)-[chicken-boat, fox-near, grain-near, boat-near], object_to(boat, far)-[boat-far, chicken-boat, fox-near, grain-near], object_to(chicken, hands)-[chicken-hands, boat-far, fox-near, … - …], object_to(chicken, far)-[chicken-far, boat-far, … - …|…], object_to(boat, near)-[boat-near, … - …|…], object_to(fox, hands)-[… - …|…], object_to(…, …)-[…|…], … - …|…].
