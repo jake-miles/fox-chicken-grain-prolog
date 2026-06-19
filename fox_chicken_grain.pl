@@ -1,7 +1,5 @@
 :- use_module(library(apply)).
 :- use_module(library(clpfd)).
-:- use_module(library(yall)).
-:- use_module(library(reif)).
 
 /*
   The fox, chicken and grain puzzle, in prolog.
@@ -362,10 +360,10 @@ sequence_start_finish_acc(Previous, State, Finish, Previous) :-
 
 sequence_start_finish_acc(Transitions, Start, Finish, Previous) :-
   state_moves_valid(Start, AvailableMoves),
-  print_state(Start), nl,
+%  print_state(Start), nl,
   include(start_previous_move_unique(Start, Previous), AvailableMoves, UniqueMoves),
   member(Move, UniqueMoves),
-  print(Move), nl,
+%  print(Move), nl,
   state_move_applied(Start, Move, NextState),
   sequence_start_finish_acc(Transitions, NextState, Finish, [Move-NextState|Previous]).
 
@@ -381,4 +379,37 @@ print_state(S) :-
     keysort(S, Sorted),
     print(Sorted).
 
-% ?- solution(S).
+print_nl(X) :-
+    print(X),
+    nl.
+
+
+% ?- solution(S), maplist(print_nl, S).
+%@ object_to(chicken,hands)-[chicken-hands,fox-near,grain-near,boat-near]
+%@ object_to(chicken,boat)-[chicken-boat,fox-near,grain-near,boat-near]
+%@ object_to(boat,far)-[boat-far,chicken-boat,fox-near,grain-near]
+%@ object_to(chicken,hands)-[chicken-hands,boat-far,fox-near,grain-near]
+%@ object_to(chicken,far)-[chicken-far,boat-far,fox-near,grain-near]
+%@ object_to(boat,near)-[boat-near,chicken-far,fox-near,grain-near]
+%@ object_to(fox,hands)-[fox-hands,boat-near,chicken-far,grain-near]
+%@ object_to(fox,boat)-[fox-boat,boat-near,chicken-far,grain-near]
+%@ object_to(boat,far)-[boat-far,fox-boat,chicken-far,grain-near]
+%@ object_to(fox,hands)-[fox-hands,boat-far,chicken-far,grain-near]
+%@ object_to(chicken,hands)-[chicken-hands,fox-hands,boat-far,grain-near]
+%@ object_to(chicken,boat)-[chicken-boat,fox-hands,boat-far,grain-near]
+%@ object_to(fox,far)-[fox-far,chicken-boat,boat-far,grain-near]
+%@ object_to(boat,near)-[boat-near,fox-far,chicken-boat,grain-near]
+%@ object_to(chicken,hands)-[chicken-hands,boat-near,fox-far,grain-near]
+%@ object_to(grain,hands)-[grain-hands,chicken-hands,boat-near,fox-far]
+%@ object_to(grain,boat)-[grain-boat,chicken-hands,boat-near,fox-far]
+%@ object_to(chicken,near)-[chicken-near,grain-boat,boat-near,fox-far]
+%@ object_to(boat,far)-[boat-far,chicken-near,grain-boat,fox-far]
+%@ object_to(grain,hands)-[grain-hands,boat-far,chicken-near,fox-far]
+%@ object_to(grain,far)-[grain-far,boat-far,chicken-near,fox-far]
+%@ object_to(boat,near)-[boat-near,grain-far,chicken-near,fox-far]
+%@ object_to(chicken,hands)-[chicken-hands,boat-near,grain-far,fox-far]
+%@ object_to(chicken,boat)-[chicken-boat,boat-near,grain-far,fox-far]
+%@ object_to(boat,far)-[boat-far,chicken-boat,grain-far,fox-far]
+%@ object_to(chicken,hands)-[chicken-hands,boat-far,grain-far,fox-far]
+%@ object_to(chicken,far)-[chicken-far,boat-far,grain-far,fox-far]
+%@ S = [object_to(chicken, hands)-[chicken-hands, fox-near, grain-near, boat-near], object_to(chicken, boat)-[chicken-boat, fox-near, grain-near, boat-near], object_to(boat, far)-[boat-far, chicken-boat, fox-near, grain-near], object_to(chicken, hands)-[chicken-hands, boat-far, fox-near, … - …], object_to(chicken, far)-[chicken-far, boat-far, … - …|…], object_to(boat, near)-[boat-near, … - …|…], object_to(fox, hands)-[… - …|…], object_to(…, …)-[…|…], … - …|…].
